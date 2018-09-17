@@ -38,6 +38,13 @@ def check_imsi(imsi):
         raise ParamValueError(imsi, "Invalid argument imsi length")
 
 
+def check_mei(mei):
+    if not all([is_digit(x) for x in mei]):
+        raise ParamValueError(mei, "Invalid argument mei")
+    if not 0 <= len(mei) <= 16:
+        raise ParamValueError(mei, "Invalid argument mei length")
+
+
 def check_bearer_context(bearer_context):
     try:
         bearer_id, arp, qci, mbr_uplink, mbr_downlink, gbr_uplink, gbr_downlink = bearer_context.split(',')
@@ -60,9 +67,11 @@ ImplementedParameters = {"imsi": check_imsi,
                          "apn-ambr": check_value,
                          "selection-mode": check_value,
                          "msisdn": check_value,
+                         "mei": check_mei,
                          "apn-restriction-type": check_value,
                          "uli-mcc-mnc-tai": check_value,
                          "uli-mcc-mnc-ecgi": check_value,
+                         "indication": check_value
                          }
 
 
@@ -166,10 +175,16 @@ Type 'help' for more information.
         cmd_args_list = args.split()
         if len(cmd_args_list) == 0:
             pass
-        elif len(cmd_args_list) <2:
+        elif len(cmd_args_list) < 2:
             print("incomplete cmd: ", "create " + args)
         elif len(cmd_args_list) in [2, 3, 4, 5]:
-            if cmd_args_list[0].lower() in ['profile',]:
+            if cmd_args_list[0].lower() in ['profile', "session-group"]:
+                if cmd_args_list[0].lower() == "session-group":
+                    if len(cmd_args_list) < 4:
+                        print("incomplete cmd: ", "create " + args)
+                        return
+                    else:
+                        pass
                 cmd_args_list.insert(0, 'create')
                 self.server.events_queue.put(cmd_args_list)
             else:
@@ -224,10 +239,24 @@ Type 'help' for more information.
         cmd_args_list = args.split()
         if len(cmd_args_list) == 0:
             pass
-        elif len(cmd_args_list) in [1, 2, 3, 4]:
+        elif len(cmd_args_list) == 1:
             if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
-                cmd_args_list.insert(0, "proc")
-                self.server.events_queue.put(cmd_args_list)
+                print("incomplete cmd: ", "proc " + args)
+            else:
+                print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
+        elif len(cmd_args_list) == 2:
+            if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
+                if cmd_args_list[1].lower() in ["imsi", "group"]:
+                    print("incomplete cmd: ", "proc " + args)
+                else:
+                    print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
+            else:
+                print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
+        elif len(cmd_args_list) in [3, 4]:
+            if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
+                if cmd_args_list[1].lower() in ["imsi", "group"]:
+                    cmd_args_list.insert(0, "proc")
+                    self.server.events_queue.put(cmd_args_list)
             else:
                 print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
                 print("Use 'help proc' for detail usage")
