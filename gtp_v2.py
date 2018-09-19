@@ -43,6 +43,8 @@ GTPmessageType = {1: "echo_request",
                      35: "modify_bearer_res",
                      36: "delete_session_req",
                      37: "delete_session_res",
+                     95: "create_bearer_req",
+                     96: "create_bearer_res",
                      70: "downlink_data_notif_failure_indic",
                      170: "realease_bearers_req",
                      171: "realease_bearers_res",
@@ -65,6 +67,7 @@ IEType = {1: "IMSI",
              80: "Bearer QoS",
              82: "RAT",
              83: "Serving Network",
+             84: "Bearer TFT",
              86: "ULI",
              87: "F-TEID",
              93: "Bearer Context",
@@ -409,6 +412,10 @@ PDN_TYPES = {
     1: "IPv4",
     2: "IPv6",
     3: "IPv4/IPv6",
+}
+
+TFT_OperationCode = {
+    1: "Create New TFT",
 }
 
 PCO_OPTION_TYPES = {
@@ -781,6 +788,45 @@ class IE_NodeFeatures(gtp.IE_Base):
                    ]
 
 
+class PacketFilter(gtp.IE_Base):
+    name = "Packet Filter"
+    fields_desc = [BitField("Spare", 0, 2),
+                   BitField("Direction", 0, 2),
+                   BitField("Identifier", 0, 4),
+                   ByteField("Precedence", 0),
+                   ByteField("length", 0),
+                   ConditionalField(
+                       ByteField("component_type_idendifier1", 0),
+                       lambda pkt: pkt.length),
+                   ConditionalField(
+                       IPField("id1_ipv4", 0), lambda pkt: pkt.component_type_idendifier1 == 16),
+                   ConditionalField(
+                       IPField("id1_ipv4_mask", 0), lambda pkt: pkt.component_type_idendifier1 == 16),
+                   ConditionalField(
+                       ByteField("id1_protocol", 0), lambda pkt: pkt.component_type_idendifier1 == 48),
+                   ConditionalField(
+                       ByteField("component_type_idendifier2", 0), lambda pkt: pkt.length > 2),
+                   ConditionalField(
+                       ByteField("id2_protocol", 0), lambda pkt: pkt.component_type_idendifier2 in (48,))
+                   ]
+
+
+class IE_BearerTFT(gtp.IE_Base):
+    name = "IE Bearer TFT"
+    fields_desc = [ByteEnumField("ietype", 84, IEType),
+                   ShortField("length", 0),
+                   BitField("CR_flag", 0, 4),
+                   BitField("instance", 0, 4),
+                   BitEnumField("operation_code", None, 3, TFT_OperationCode),
+                   BitField("E", 0, 1),
+                   BitField("NOPF", 0, 4),
+                   ConditionalField(PacketField("Filter1", None, PacketFilter),
+                                    lambda pkt: pkt.NOPF >= 1),
+                   ConditionalField(PacketField("Filter2", None, PacketFilter),
+                                    lambda pkt: pkt.NOPF >= 2)
+                   ]
+
+
 ietypecls = {1: IE_IMSI,
              2: IE_Cause,
              3: IE_RecoveryRestart,
@@ -796,6 +842,7 @@ ietypecls = {1: IE_IMSI,
              80: IE_Bearer_QoS,
              82: IE_RAT,
              83: IE_ServingNetwork,
+             84: IE_BearerTFT,
              86: IE_ULI,
              87: IE_FTEID,
              93: IE_BearerContext,
@@ -863,8 +910,16 @@ class GTPV2ModifyBearerResponse(GTPV2Command):
     name = "GTPv2 Modify Bearer Response"
 
 
+class GTPV2CreateBearerRequest(GTPV2Command):
+    name = "GTPv2 Create Bearer Request"
+
+
+class GTPV2CreateBearerResponse(GTPV2Command):
+    name = "GTPv2 Create Bearer Response"
+
+
 class GTPV2UpdateBearerRequest(GTPV2Command):
-    name = "GTPv2 Update Bearer Request"
+    name = "GTPv2 Create Bearer Request"
 
 
 class GTPV2UpdateBearerResponse(GTPV2Command):
@@ -937,6 +992,8 @@ bind_layers(GTPHeader, GTPV2DeleteSessionResponse, gtp_type=37)
 bind_layers(GTPHeader, GTPV2ModifyBearerCommand, gtp_type=64)
 bind_layers(GTPHeader, GTPV2ModifyBearerFailureNotification, gtp_type=65)
 bind_layers(GTPHeader, GTPV2DownlinkDataNotifFailureIndication, gtp_type=70)
+bind_layers(GTPHeader, GTPV2CreateBearerRequest, gtp_type=95)
+bind_layers(GTPHeader, GTPV2CreateBearerResponse, gtp_type=96)
 bind_layers(GTPHeader, GTPV2UpdateBearerRequest, gtp_type=97)
 bind_layers(GTPHeader, GTPV2UpdateBearerResponse, gtp_type=98)
 bind_layers(GTPHeader, GTPV2DeleteBearerRequest, gtp_type=99)

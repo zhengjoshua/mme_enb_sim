@@ -314,12 +314,13 @@ Type 'help' for more information.
         show bearer {enb|sgw} <teid> - Show bearer information given its downlink or uplink TEID.
         show mme [id/address]        - Show MME information given its id or address.
         show profile <prof-id> [params] - Show profile information/ parameters.
+        show session pdn <imsi> {<lbi>}
         """
         cmd_args_list = args.split()
         if len(cmd_args_list) == 0:
             pass
         elif len(cmd_args_list) in [1, 2, 3, 4]:
-            if cmd_args_list[0].lower() in ["bearer", "mme", "profile"]:
+            if cmd_args_list[0].lower() in ["bearer", "mme", "profile", "session"]:
                 cmd_args_list.insert(0, "show")
                 self.server.events_queue.put(cmd_args_list)
             else:

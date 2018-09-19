@@ -1,7 +1,41 @@
 from gtp_v2 import *
 from collections import OrderedDict
 
-GTPV2Message_dict = {
+CauseNameToValue = {
+    "Request Accepted": 16,
+}
+
+IETypeNameToCode = {
+    "IMSI": 1,
+    "Cause": 2,
+    "Recovery Restart": 3,
+    "APN": 71,
+    "AMBR": 72,
+    "EPS Bearer ID": 73,
+    "IPv4": 74,
+    "MEI": 75,
+    "MSISDN": 76,
+    "Indication": 77,
+    "Protocol Configuration Options": 78,
+    "PAA": 79,
+    "Bearer QoS": 80,
+    "RAT": 82,
+    "Serving Network": 83,
+    "ULI": 86,
+    "F-TEID": 87,
+    "Bearer Context": 93,
+    "Charging ID": 94,
+    "Charging Characteristics": 95,
+    "PDN Type": 99,
+    "UE Time zone": 114,
+    "Port Number": 126,
+    "APN Restriction": 127,
+    "Selection Mode": 128,
+    "Node Features": 152,
+    "Max MBR/APN-AMBR (MMBR)": 161
+}
+
+GTPV2MessageOptionalIEdict = {
     "echo_request":
     ["GTPV2IE_RecoveryRestart"],
 
@@ -11,7 +45,7 @@ GTPV2Message_dict = {
         "GTPV2IE_MSISDN",
         "GTPV2IE_ULI",
         "GTPV2IE_ServingNetwork",
-        "GTPv2IE_RAT",
+        "GTPV2IE_RAT",
         # "GTPV2IE_Indication",
         "GTPV2IE_FTEID-S11",
         "GTPV2IE_FTEID-S5S8",
@@ -26,6 +60,7 @@ GTPV2Message_dict = {
         "GTPV2IE_ChargingCharacteristics"
     ]
 }
+
 
 class GTPV2IE_RecoveryRestart(IE_RecoveryRestart):
     def __init__(self):
@@ -110,7 +145,7 @@ class GTPV2IE_ServingNetwork(IE_ServingNetwork):
         self.length = 3
 
 
-class GTPv2IE_RAT(IE_RAT):
+class GTPV2IE_RAT(IE_RAT):
     def __init__(self):
         super(IE_RAT, self).__init__()
 
@@ -211,7 +246,13 @@ class GTPV2IE_PDN_type(IE_PDN_type):
         super(IE_PDN_type, self).__init__()
 
     def set_field_value(self, *parameter):
-        self.PDN_type = int(parameter[0])
+        if int(parameter[0]) == 4:
+            self.PDN_type = 1
+        elif int(parameter[0]) == 6:
+            self.PDN_type = 2
+        else:
+            self.PDN_type = int(parameter[0])
+
         self.length = 1
 
 
@@ -281,6 +322,16 @@ class GTPV2IE_BearerContext(IE_BearerContext):
         ie_list = [IE_EPSBearerID(ietype='EPS Bearer ID', length=1, EBI=5), bearer_qos]
         self.IE_list = ie_list
         self.length = 31
+
+
+class GTPV2IE_UE_Timezone(IE_UE_Timezone):
+    def __init__(self):
+        super(IE_UE_Timezone, self).__init__()
+
+    def set_field_value(self, *parameter):
+        timezone, dst = parameter[0].split(',')
+        self.Timezone = int(timezone)
+        self.DST = int(dst)
 
 
 class GTPV2IE_ChargingCharacteristics(IE_ChargingCharacteristics):
