@@ -60,6 +60,8 @@ IEAttrNameToProfileAttrName = {
     "mme-s11c-address": "mme-s11c-address",
     "pgw-s5s8-address": "pgw-s5s8-address",
     "mme-s11c-teid": "mme-s11c-teid",
+    "enb-s1u-address": "enb-s1u-address",
+    "enodeb-s1u-teid": "enodeb-s1u-teid",
     "restart-counter": "restart-counter"
 }
 
@@ -73,7 +75,7 @@ IENameToProfileParamName = {
     "GTPV2IE_Indication": "indication",
     "mme-s11c-address": "mme-s11c-address",
     "pgw-s5s8-address": "pgw-s5s8-address",
-    "GTPv2IE_RAT": "rat-type",
+    "GTPV2IE_RAT": "rat-type",
     "GTPV2IE_APN": "apn",
     "GTPV2IE_SelectionMode": "selection-mode",
     "GTPV2IE_PDN_type": "pdn-type",
@@ -176,12 +178,11 @@ class Server:
                     if profile:
                         profile.set_parameter_value(received_event[3], received_event[4])
                         if received_event[3] == "mei":
-                            if "GTPV2IE_MEI" not in GTPV2Message_dict["create_session_req"]:
-                                GTPV2Message_dict["create_session_req"].insert(2, "GTPV2IE_MEI")
+                            if "GTPV2IE_MEI" not in GTPV2MessageOptionalIEdict["create_session_req"]:
+                                GTPV2MessageOptionalIEdict["create_session_req"].append("GTPV2IE_MEI")
                         if received_event[3] == "indication":
-                            if "GTPV2IE_Indication" not in GTPV2Message_dict["create_session_req"]:
-                                index = GTPV2Message_dict["create_session_req"].index("GTPv2IE_RAT") + 1
-                                GTPV2Message_dict["create_session_req"].insert(index, "GTPV2IE_Indication")
+                            if "GTPV2IE_Indication" not in GTPV2MessageOptionalIEdict["create_session_req"]:
+                                GTPV2MessageOptionalIEdict["create_session_req"].append("GTPV2IE_Indication")
                     else:
                         print("Profile {i} not exist".format(i=received_event[2]))
 
@@ -212,6 +213,11 @@ class Server:
                             print(profile)
                     else:
                         self.show_profile(received_event[2])
+                elif received_event[1] == "session":
+                    if received_event[2] == "pdn":
+                        imsi = received_event[3]
+                        session = self.mme_list[0].find_session_by_imsi(imsi)
+                        print(session)
 
             elif received_event[0] == "proc":
                 if received_event[1] == "attach":
@@ -219,7 +225,19 @@ class Server:
                         group_id = received_event[3]
                         session_group = self.mme_list[0].find_session_group(group_id)
                         if session_group:
-                            self.mme_list[0].send_create_session_request(session_group.profile)
+                            # self.mme_list[0].send_create_session_request(session_group.profile)
+                            self.mme_list[0].process_attach_group(session_group)
+                        else:
+                            print("session-group {i} not found".format(i=group_id))
+                    elif received_event[2] == "imsi":
+                        pass
+                elif received_event[1] == "detach":
+                    if received_event[2] == "group":
+                        group_id = received_event[3]
+                        session_group = self.mme_list[0].find_session_group(group_id)
+                        if session_group:
+                            # self.mme_list[0].send_create_session_request(session_group.profile)
+                            self.mme_list[0].process_detach_group(session_group)
                         else:
                             print("session-group {i} not found".format(i=group_id))
                     elif received_event[2] == "imsi":
@@ -325,6 +343,7 @@ class MME:
         self.session_group_list = []
         self.sessions = set()
         self.sequence_number = 1
+        self.restart_counter = 1
 
     def __str__(self):
         info = """-------------------------------------------------------------------------------
@@ -412,14 +431,17 @@ Active sessions       :  {s}
                 continue
 
             if gtp_message_type == GTPV2MessageNameToType["echo_request"]:
-                recovery_restart = IE_RecoveryRestart(ietype='Recovery Restart', length=1, restart_counter=1)
-                echo_response = GTPHeader(version=2, gtp_type=2, ) / recovery_restart
+                recovery_restart = IE_RecoveryRestart(ietype='Recovery Restart', length=1,
+                                                      restart_counter=self.restart_counter)
+                peer_sequence_number = gtp_message.seq
+                echo_response = GTPHeader(version=2, gtp_type=2, seq=peer_sequence_number) / recovery_restart
+                setattr(echo_response, "length", 4 + len(recovery_restart))
                 self.sent_message_queue.put(bytes(echo_response))
             elif gtp_message_type == GTPV2MessageNameToType["echo_response"]:
                 self.status = PeerStatus["EchoResponseReceived"]
             elif gtp_message_type == GTPV2MessageNameToType["create_session_res"]:
-                gtp_message.show()
-                self.events_queue.put(BearerEvent['ModifyBearerResponse'])
+                self.process_create_session_response(gtp_message)
+                # self.events_queue.put(BearerEvent['ModifyBearerResponse'])
 
     def process_event_queue(self):
         while self.run:
@@ -442,7 +464,6 @@ Active sessions       :  {s}
                 if send_buffer == STOP_THREAD:
                     break
                 self.socket.send(send_buffer)
-                self.sequence_number += 1
             except Empty:
                 continue
             except OSError as e:
@@ -460,14 +481,11 @@ Active sessions       :  {s}
 
     def generate_echo_request(self, profile):
         echo_request_head = GTPHeader(length=4, gtp_type=1, seq=self.sequence_number)
-        message_ie_list = GTPV2Message_dict.get("echo_request")
-        length_of_all_ies = 0
-        for ie_name in message_ie_list:
-            ie = self.create_ie(ie_name, profile)
-            if ie:
-                echo_request_head.add_payload(ie)
-                length_of_all_ies += len(ie)
-        setattr(echo_request_head, "length", 4 + length_of_all_ies)
+        self.sequence_number += 1
+        recovery_restart = IE_RecoveryRestart(ietype='Recovery Restart', length=1,
+                                              restart_counter=self.restart_counter)
+        echo_request_head /= recovery_restart
+        setattr(echo_request_head, "length", 4 + len(recovery_restart))
         return bytes(echo_request_head)
 
     def create_ie(self, name, profile):
@@ -506,18 +524,252 @@ Active sessions       :  {s}
 
         return ie
 
-    def proc_attach_group(self, session_group):
-        message_ie_list = GTPV2Message_dict.get("create_session_req")
+    def process_attach_group(self, session_group):
+        profile = session_group.profile
         for i in range(session_group.size):
             imsi = session_group.current_imsi
             session = Session(imsi)
+            session_group.sessions.append(session)
+            session.first_enodeb_s1u_teid = session_group.current_enodeb_s1u_f_teid
+
             bearer = Bearer(imsi, 5)
             session.bearer_list.append(bearer)
-            session_group.sessions.append(session)
+            bearer.enodeb_s1u_teid = session.first_enodeb_s1u_teid
+            bearer.enodeb_s1u_teid_ipv4 = session_group.enodeb_s1u_f_teid_ipv4
+
+            create_session_request = GTPHeader(length=8, gtp_type=32, T=1, teid=0, seq=self.sequence_number)
+            self.sequence_number += 1
+            length_of_all_ies = 0
+
+            ie_imsi = GTPV2IE_IMSI()
+            ie_imsi.set_field_value(imsi)
+            create_session_request.add_payload(ie_imsi)
+            length_of_all_ies += len(ie_imsi)
+
+            ie_msisdn = GTPV2IE_MSISDN()
+            ie_msisdn.set_field_value(session_group.current_msisdn)
+            create_session_request.add_payload(ie_msisdn)
+            length_of_all_ies += len(ie_msisdn)
+            session.msisdn = ie_msisdn.MSISDN
+
+            if "GTPV2IE_MEI" in GTPV2MessageOptionalIEdict.get("create_session_req"):
+                ie_mei = GTPV2IE_MEI()
+                ie_mei.set_field_value(session_group.current_mei)
+                create_session_request.add_payload(ie_mei)
+                length_of_all_ies += len(ie_mei)
+                session.mei = ie_mei.MEI
+
+            ie_uli = GTPV2IE_ULI()
+            uli_tai = profile.get_parameter_by_name("ULI_TAI")
+            uli_ecgi = profile.get_parameter_by_name("ULI_ECGI")
+            ie_uli.set_field_value(uli_tai, uli_ecgi)
+            create_session_request.add_payload(ie_uli)
+            session.tai_mcc = ie_uli.TAI.MCC
+            session.tai_mnc = ie_uli.TAI.MNC
+            session.tac = ie_uli.TAI.TAC
+            session.ecgi_mcc = ie_uli.ECGI.MCC
+            session.ecgi_mnc = ie_uli.ECGI.MNC
+            session.eci = ie_uli.ECGI.ECI
+            length_of_all_ies += len(ie_uli)
+
+            ie_serving_network = GTPV2IE_ServingNetwork()
+            value = profile.get_parameter_by_name("GTPV2IE_ServingNetwork")
+            ie_serving_network.set_field_value(value)
+            create_session_request.add_payload(ie_serving_network)
+            length_of_all_ies += len(ie_serving_network)
+            session.mcc = ie_serving_network.MCC
+            session.mnc = ie_serving_network.MNC
+
+            ie_rat_type = GTPV2IE_RAT()
+            value = profile.get_parameter_by_name("GTPV2IE_RAT")
+            ie_rat_type.set_field_value(value)
+            create_session_request.add_payload(ie_rat_type)
+            length_of_all_ies += len(ie_rat_type)
+            session.rat_type = ie_rat_type.RAT_type
+
+            if "GTPV2IE_Indication" in GTPV2MessageOptionalIEdict.get("create_session_req"):
+                ie_indication = GTPV2IE_Indication()
+                value = profile.get_parameter_by_name("GTPV2IE_Indication")
+                ie_indication.set_field_value(value)
+                create_session_request.add_payload(ie_indication)
+                length_of_all_ies += len(ie_indication)
+                session.indication = value
+
+            ie_mme_s11c_f_teid = GTPV2IE_FTEID()
+            teid = session_group.current_mme_s11c_f_teid
+            f_teid_ipv4 = profile.get_attribute_value_by_name("mme-s11c-address")[0]
+            ie_mme_s11c_f_teid.set_field_value(0, teid, 10, f_teid_ipv4)
+            create_session_request.add_payload(ie_mme_s11c_f_teid)
+            length_of_all_ies += len(ie_mme_s11c_f_teid)
+            session.mme_s11c_f_teid = teid
+            session.mme_s11c_f_teid_ipv4 = f_teid_ipv4
+
+            ie_mme_s5s8c_f_teid = GTPV2IE_FTEID()
+            teid = 0x0
+            f_teid_ipv4 = profile.get_attribute_value_by_name("pgw-s5s8-address")[0]
+            ie_mme_s5s8c_f_teid.set_field_value(1, teid, 7, f_teid_ipv4)
+            create_session_request.add_payload(ie_mme_s5s8c_f_teid)
+            length_of_all_ies += len(ie_mme_s5s8c_f_teid)
+            session.mme_s5s8c_f_teid = teid
+            session.mme_s5s8c_f_teid_ipv4 = f_teid_ipv4
+
+            ie_apn = GTPV2IE_APN()
+            value = profile.get_parameter_by_name("GTPV2IE_APN")
+            ie_apn.set_field_value(value)
+            create_session_request.add_payload(ie_apn)
+            length_of_all_ies += len(ie_apn)
+            session.apn = value
+
+            ie_selection_mode = GTPV2IE_SelectionMode()
+            value = profile.get_parameter_by_name("GTPV2IE_SelectionMode")
+            ie_selection_mode.set_field_value(value)
+            create_session_request.add_payload(ie_selection_mode)
+            length_of_all_ies += len(ie_selection_mode)
+            session.selection_mode = ie_selection_mode.SelectionMode
+
+            ie_pdn_type = GTPV2IE_PDN_type()
+            value = profile.get_parameter_by_name("GTPV2IE_PDN_type")
+            ie_pdn_type.set_field_value(value)
+            create_session_request.add_payload(ie_pdn_type)
+            length_of_all_ies += len(ie_pdn_type)
+            if int(value) == 4:
+                session.pdn_type = "ipv4"
+            elif int(value) == 6:
+                session.pdn_type = "ipv6"
+
+            ie_paa = GTPV2IE_PAA()
+            static_paa = profile.get_parameter_by_name("GTPV2IE_PAA")
+            if static_paa == "false":
+                if session.pdn_type == "ipv4":
+                    ie_paa.set_field_value(1, "0.0.0.0")
+                    create_session_request.add_payload(ie_paa)
+                    length_of_all_ies += len(ie_paa)
+                    session.paa = ie_paa.ipv4
+                elif session.pdn_type == "ipv6":
+                    ie_paa.set_field_value(2, "2001:db8:0:42::")
+                    create_session_request.add_payload(ie_paa)
+                    length_of_all_ies += len(ie_paa)
+                    session.paa = ie_paa.ipv6
+                else:
+                    pass
+
+            ie_apn_restriction = GTPV2IE_APN_Restriction()
+            value = profile.get_parameter_by_name("GTPV2IE_APN_Restriction")
+            ie_apn_restriction.set_field_value(value)
+            create_session_request.add_payload(ie_apn_restriction)
+            length_of_all_ies += len(ie_apn_restriction)
+            session.apn_restriction = ie_apn_restriction.APN_Restriction
+
+            ie_ambr = GTPV2IE_AMBR()
+            value = profile.get_parameter_by_name("GTPV2IE_AMBR")
+            ie_ambr.set_field_value(value)
+            create_session_request.add_payload(ie_ambr)
+            length_of_all_ies += len(ie_ambr)
+            session.ambr_uplink = ie_ambr.AMBR_Uplink
+            session.ambr_downlink = ie_ambr.AMBR_Downlink
+
+            ie_pco = GTPV2IE_PCO()
+            value = profile.get_parameter_by_name("GTPV2IE_PCO")
+            ie_pco.set_field_value(value)
+            create_session_request.add_payload(ie_pco)
+            length_of_all_ies += len(ie_pco)
+            session.pco = value
+
+            ie_bearer_context = GTPV2IE_BearerContext()
+            value = profile.get_parameter_by_name("GTPV2IE_BearerContext")
+            ie_bearer_context.set_field_value(value)
+            create_session_request.add_payload(ie_bearer_context)
+            length_of_all_ies += len(ie_bearer_context)
+            bearer.qci = ie_bearer_context.IE_list[1].QCI
+            bearer.arp = ie_bearer_context.IE_list[1].PriorityLevel
+            bearer.mbr_uplink = ie_bearer_context.IE_list[1].MaxBitRateForUplink
+            bearer.mbr_downlink = ie_bearer_context.IE_list[1].MaxBitRateForDownlink
+            bearer.gbr_uplink = ie_bearer_context.IE_list[1].GuaranteedBitRateForUplink
+            bearer.gbr_downlink = ie_bearer_context.IE_list[1].GuaranteedBitRateForDownlink
+            bearer.bearer_id = ie_bearer_context.IE_list[0].EBI
+
+            if "GTPV2IE_ChargingCharacteristics" in GTPV2MessageOptionalIEdict.get("create_session_req"):
+                ie_cc = GTPV2IE_ChargingCharacteristics()
+                value = profile.get_parameter_by_name("GTPV2IE_ChargingCharacteristics")
+                ie_cc.set_field_value(value)
+                create_session_request.add_payload(ie_cc)
+                length_of_all_ies += len(ie_cc)
+                session.cc = value
+
+            if "GTPV2IE_UE_Timezone" in GTPV2MessageOptionalIEdict.get("create_session_req"):
+                ie_timezone = GTPV2IE_UE_Timezone()
+                value = profile.get_parameter_by_name("GTPV2IE_UE_Timezone")
+                ie_timezone.set_field_value(value)
+                create_session_request.add_payload(ie_timezone)
+                length_of_all_ies += len(ie_timezone)
+                session.timezone = ie_timezone.Timezone
+                session.DST = ie_timezone.DST
+
+            setattr(create_session_request, "length", 8 + length_of_all_ies)
+            send_data = bytes(create_session_request)
+            self.sent_message_queue.put(send_data)
+            session_group.generate_next_id()
+        session_group.reset()
+
+    def process_detach_group(self, session_group):
+        for session in session_group.sessions:
+            self.send_delete_session_request(session)
+
+    def process_create_session_response(self, message):
+        session = self.find_session_by_teid(message.teid)
+        if session:
+            cause = self.find_ie(message, IETypeNameToCode["Cause"], 0).Cause
+            if cause == CauseNameToValue["Request Accepted"]:
+                session.status = "ATTACHED_ACTIVE"
+                # pco = self.find_ie(message, IETypeNameToCode["Cause"], 0)
+                # if pco:
+                #     session.pco = pco.Protocols[0].PPP.Options[0].address
+
+                f_teid = self.find_ie(message, IETypeNameToCode["F-TEID"], 0)
+                if f_teid.InterfaceType == 11:  #SGW GTP-C
+                    session.sgw_s11s4c_teid = f_teid.GRE_Key
+                    session.sgw_s11s4c_teid_ipv4 = f_teid.ipv4
+
+                f_teid = self.find_ie(message, IETypeNameToCode["F-TEID"], 1)
+                if f_teid.InterfaceType == 7:  #SGW GTP-C
+                    session.pgw_s5s8c_teid = f_teid.GRE_Key
+                    session.pgw_s5s8c_teid_ipv4 = f_teid.ipv4
+
+                paa = self.find_ie(message, IETypeNameToCode["PAA"], 0)
+                if paa:
+                    self.pdn_type = paa.PDN_type
+                    if self.pdn_type == 1:
+                        self.paa = paa.ipv4
+                    elif self.pdn_type == 2:
+                        self.paa = paa.ipv6
+                    else:
+                        pass
+
+                bearer_context = self.find_ie(message, IETypeNameToCode["Bearer Context"], 0)
+                if bearer_context:
+                    ie_bearer_id = self.find_ie(bearer_context, IETypeNameToCode["EPS Bearer ID"], 0)
+                    if ie_bearer_id:
+                        bearer_id = ie_bearer_id.EBI
+                        bearer = session.get_bearer_by_id(bearer_id)
+                        if bearer:
+                            f_teid = self.find_ie(bearer_context, IETypeNameToCode["F-TEID"], 0)
+                            if f_teid.InterfaceType == 1:  # SGW S1U
+                                bearer.sgw_s1u_teid = f_teid.GRE_Key
+                                bearer.sgw_s1u_teid_ipv4 = f_teid.ipv4
+
+                            f_teid = self.find_ie(bearer_context, IETypeNameToCode["F-TEID"], 2)
+                            if f_teid.InterfaceType == 5:  # PGW S5S8U
+                                bearer.pgw_s5s8u_teid = f_teid.GRE_Key
+                                bearer.pgw_s5s8u_teid_ipv4 = f_teid.ipv4
+
+                        self.send_modify_bearer_request(session, bearer_id)
+
+            else:
+                pass
 
     def send_create_session_request(self, profile):
         create_session_request = GTPHeader(length=8, gtp_type=32, T=1, teid=0, seq=self.sequence_number)
-        message_ie_list = GTPV2Message_dict.get("create_session_req")
+        message_ie_list = GTPV2MessageOptionalIEdict.get("create_session_req")
         length_of_all_ies = 0
         for ie_name in message_ie_list:
             ie = self.create_ie(ie_name, profile)
@@ -526,6 +778,44 @@ Active sessions       :  {s}
                 length_of_all_ies += len(ie)
         setattr(create_session_request, "length", 8 + length_of_all_ies)
         send_data = bytes(create_session_request)
+        self.sent_message_queue.put(send_data)
+
+    def send_modify_bearer_request(self, session, bearer_id):
+        modify_bearer_request = GTPHeader(length=8, gtp_type=34, T=1, teid=session.sgw_s11s4c_teid,
+                                          seq=self.sequence_number)
+        self.sequence_number += 1
+        length_of_all_ies = 0
+
+        bearer = session.get_bearer_by_id(bearer_id)
+
+        enodeb_s1u_fteid = IE_FTEID(ietype='F-TEID', length=9, ipv4_present=1, InterfaceType=0,
+                                    GRE_Key=bearer.enodeb_s1u_teid,
+                                    ipv4=bearer.enodeb_s1u_teid_ipv4)
+        ie_bearer_context = IE_BearerContext(ietype='Bearer Context', length=18,
+                                          IE_list=[IE_EPSBearerID(ietype='EPS Bearer ID', length=1, EBI=bearer_id),
+                                                   enodeb_s1u_fteid])
+
+        modify_bearer_request.add_payload(ie_bearer_context)
+        length_of_all_ies += len(ie_bearer_context)
+
+        setattr(modify_bearer_request, "length", 8 + length_of_all_ies)
+        send_data = bytes(modify_bearer_request)
+        self.sent_message_queue.put(send_data)
+
+    def send_delete_session_request(self, session):
+        delete_session_request = GTPHeader(length=8, gtp_type=36, T=1, teid=session.sgw_s11s4c_teid,
+                                          seq=self.sequence_number)
+        self.sequence_number += 1
+
+        bearer = session.bearer_list[0]
+        length_of_all_ies = 0
+
+        ie_bearer_id = IE_EPSBearerID(ietype='EPS Bearer ID', length=1, EBI=bearer.bearer_id)
+        delete_session_request /= ie_bearer_id
+        length_of_all_ies += len(ie_bearer_id)
+
+        setattr(delete_session_request, "length", 8 + length_of_all_ies)
+        send_data = bytes(delete_session_request)
         self.sent_message_queue.put(send_data)
 
     def create_session_group(self, group_id, profile, size):
@@ -542,6 +832,25 @@ Active sessions       :  {s}
             if session_group.group_id == int(group_id):
                 return session_group
         return None
+
+    def find_session_by_imsi(self, imsi):
+        for session_group in self.session_group_list:
+            for session in session_group.sessions:
+                if session.imsi == imsi:
+                    return session
+
+    def find_session_by_teid(self, teid):
+        for session_group in self.session_group_list:
+            for session in session_group.sessions:
+                if session.mme_s11c_f_teid == teid:
+                    return session
+        return None
+
+    @staticmethod
+    def find_ie(message, ietype, instance):
+        for ie in message.IE_list:
+            if ie.ietype == ietype and ie.instance == instance:
+                return ie
 
 
 class Profile:
@@ -579,6 +888,7 @@ class Profile:
                                              "sgw-s11c-port": self.set_int_value,
                                              "pgw-s5s8-address": self.set_ipv4_address,
                                              "mme-s11c-teid": self.set_hex_int_value,
+                                             "enodeb-s1u-teid": self.set_hex_int_value,
                                              "csg-cr-support": self.set_indication_flag,
                                              "pco": self.set_ipv4_address,
                                              "mei": self.set_string_value
@@ -607,6 +917,7 @@ class Profile:
         self.parameters_dict["apn"] = "cmnet"
         self.parameters_dict["imsi"] = "460020100030241"
         self.parameters_dict["msisdn"] = "8618912345678"
+        self.parameters_dict["mei"] = "123456789012345"
         self.parameters_dict["pdn-type"] = "1"
         self.parameters_dict["rat-type"] = "6"
         self.parameters_dict["indication"] = "0x0000"
@@ -832,42 +1143,138 @@ class GTPV2IE:
 class SessionGroup:
     def __init__(self, group_id, size):
         self.group_id = group_id
+        self.start_imsi = ""
+        self.start_msisdn = ""
+        self.start_mei = ""
+        self.start_mme_s11c_f_teid = 0x0
+        self.start_enodeb_s1u_f_teid = 0x0
         self.current_imsi = ""
         self.current_msisdn = ""
-        self.current_imei = ""
+        self.current_mei = ""
         self.current_mme_s11c_f_teid = 0x0
+        self.current_enodeb_s1u_f_teid = 0x0
+        self.enodeb_s1u_f_teid_ipv4 = "0.0.0.0"
         self.profile = None
         self.size = size
         self.sessions = []
 
     def set_profile(self, profile):
         self.profile = profile
-        self.current_imsi = profile.get_parameter_by_name("GTPV2IE_IMSI")
-        self.current_msisdn = profile.get_parameter_by_name("GTPV2IE_MSISDN")
-        self.current_mme_s11c_f_teid = profile.get_attribute_value_by_name("mme-s11c-teid")
+        self.start_imsi = profile.get_parameter_by_name("GTPV2IE_IMSI")
+        self.start_msisdn = profile.get_parameter_by_name("GTPV2IE_MSISDN")
+        self.start_mei = profile.get_parameter_by_name("GTPV2IE_MEI")
+        self.start_mme_s11c_f_teid = profile.get_attribute_value_by_name("mme-s11c-teid")
+        self.start_enodeb_s1u_f_teid = profile.get_attribute_value_by_name("enodeb-s1u-teid")
+        self.enodeb_s1u_f_teid_ipv4 = profile.get_attribute_value_by_name("enb-s1u-address")[0]
+        self.current_imsi = self.start_imsi
+        self.current_msisdn = self.start_msisdn
+        self.current_mei = self.start_mei
+        self.current_mme_s11c_f_teid = self.start_mme_s11c_f_teid
+        self.current_enodeb_s1u_f_teid = self.start_enodeb_s1u_f_teid
 
-    def next(self):
+    def generate_next_id(self):
         self.current_imsi = str(int(self.current_imsi) + 1)
         self.current_msisdn = str(int(self.current_msisdn) + 1)
+        if len(self.current_mei) in (15, 16):
+            self.current_mei = str(int(self.current_mei[:14]) + 1) + self.current_mei[14:]
+        else:
+            self.current_mei = str(int(self.current_mei) + 1)
         self.current_mme_s11c_f_teid += 1
+        self.current_enodeb_s1u_f_teid += 9  # 9 s1u teid for each session
+
+    def reset(self):
+        self.current_imsi = self.start_imsi
+        self.current_msisdn = self.start_msisdn
+        self.current_mei = self.start_mei
+        self.current_mme_s11c_f_teid = self.start_mme_s11c_f_teid
+        self.current_enodeb_s1u_f_teid = self.start_enodeb_s1u_f_teid
 
 
 class Session:
     def __init__(self, imsi):
         self.imsi = imsi
+        self.msisdn = ""
+        self.mei = ""
+        self.tai_mcc = ""
+        self.tai_mnc = ""
+        self.tac = 0
+        self.ecgi_mcc = ""
+        self.ecgi_mnc = ""
+        self.eci = 0
+        self.mcc = ""
+        self.mnc = ""
         self.bearer_list = []
         self.apn = ""
+        self.rat_type = 0
+        self.indication = 0x0000
+        self.mme_s11c_f_teid = 0
+        self.mme_s11c_f_teid_ipv4 = "0.0.0.0"
+        self.mme_s5s8c_f_teid = 0
+        self.mme_s5s8c_f_teid_ipv4 = "0.0.0.0"
+        self.selection_mode = 0
+        self.pdn_type = "ipv4"
+        self.paa = "0.0.0.0"
+        self.apn_restriction = 0
+        self.ambr_uplink = 0
+        self.ambr_downlink = 0
+        self.pco = "0.0.0.0"
+        self.cc = "0x0800"
+        self.timezone = 0
+        self.DST = 0
+        self.status = None
+        self.sgw_s11s4c_teid = 0
+        self.sgw_s11s4c_teid_ipv4 = "0.0.0.0"
+        self.pgw_s5s8c_teid = 0
+        self.pgw_s5s8c_teid_ipv4 = "0.0.0.0"
+        self.first_enodeb_s1u_teid = 0
+        self.enodeb_s1u_teid_ipv4 = "0.0.0.0"
+
+    def __eq__(self, other):
+        return self.imsi == other.imsi
+
+    def __str__(self):
+        text = """-------------------------------------------------------------------------------
+IMSI               APN       Type    Beare* UE Address  Status
+{imsi}   {apn}     {type}      {bearer}     {address}      {status}
+-------------------------------------------------------------------------------""".format(imsi=self.imsi,
+                                                                                                  apn=self.apn,
+                                                                                                  type=self.pdn_type,
+                                                                                                  bearer=len(
+                                                                                                      self.bearer_list),
+                                                                                                  address=self.paa,
+                                                                                          status=self.status)
+        return text
+
+    def get_session_by_imsi(self, imsi):
+        if self.imsi == imsi:
+            return self
+        return None
+
+    def get_bearer_by_id(self, bearer_id):
+        for bearer in self.bearer_list:
+            if bearer.bearer_id == bearer_id:
+                return bearer
+        return None
 
 
 class Bearer:
     def __init__(self, imsi, bearer_id):
         self.imsi = imsi
         self.bearer_id = bearer_id
-        self.bearer_type = "bearer"
-        self.bearer_status = ""
-        self.apn = ""
+        self.bearer_status = "None"
+        self.bearer_type = "Default"
         self.qci = 9
         self.arp = 15
+        self.mbr_uplink = 0
+        self.mbr_downlink = 0
+        self.gbr_uplink = 0
+        self.gbr_downlink = 0
+        self.sgw_s1u_teid = 0
+        self.sgw_s1u_teid_ipv4 = "0.0.0.0"
+        self.pgw_s5s8u_teid = 0
+        self.pgw_s5s8u_teid_ipv4 = "0.0.0.0"
+        self.enodeb_s1u_teid = 0
+        self.enodeb_s1u_teid_ipv4 = "0.0.0.0"
 
 
 
