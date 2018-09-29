@@ -28,7 +28,8 @@ def check_ipv4(ip):
 
 
 def check_value(value):
-    print("checking", value)
+    pass
+    # print("checking", value)
 
 
 def check_imsi(imsi):
@@ -58,6 +59,7 @@ def check_bearer_context(bearer_context):
 
 ImplementedParameters = {"imsi": check_imsi,
                          "cbresp-cause": check_value,
+                         "ubresp-cause": check_value,
                          "dbresp-cause": check_value,
                          "apn": check_value,
                          "pdn-type": check_value,
@@ -204,14 +206,13 @@ Type 'help' for more information.
 
     def do_delete(self, args):
         """
-        clear <peers> {peer-address}  - Disconnect peer locally
-        clear <stats> {peer-address}  - Clear statistics of peers
-        clear <sessions> {imsi}       - Removes all active sessions
+        delete profile <prof-id> - Delete specified configuration profile.
+        delete session-group <grp-id> - Delete specified session group.
         """
         pass
 
     def complete_delete(self, text, line, begidx, endidx):
-        options = ["peers", "stats", "sessions"]
+        options = ["profile", "session-group"]
         if not text:
             completions = options[:]
         else:
@@ -235,17 +236,22 @@ Type 'help' for more information.
     def do_proc(self, args):
         """
         proc attach {imsi <imsi>|group <grp-id>} - Start E-UTRAN Attach procedure for the given UE or session group.
+        proc detach {imsi <imsi>|group <grp-id>} - Start E-UTRAN Detach procedure for the given UE or session group.
+        proc handover {imsi <imsi> | group <grp-id>} <to-enb-nb> <to-sgw-nb> [lbi <lbi> rem ebi1,...] - Make handover of UE or session group to specified ENB and SGW.
+        proc idle {imsi <imsi>|group <grp-id>} [to-enb-nb] - Switch session into Idle Mode for UE or session group.
+        proc mbr {imsi <imsi>|group <grp-id>} ebi [p-cscf-resto <enable|disable|indication> | with-ctrl-teid] - Send a Modify Bearer Request for imsi or session group.
         """
         cmd_args_list = args.split()
+        options = ["attach", "detach", "handover", "idle", "mbr"]
         if len(cmd_args_list) == 0:
             pass
         elif len(cmd_args_list) == 1:
-            if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
+            if cmd_args_list[0].lower() in options:
                 print("incomplete cmd: ", "proc " + args)
             else:
                 print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
         elif len(cmd_args_list) == 2:
-            if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
+            if cmd_args_list[0].lower() in options:
                 if cmd_args_list[1].lower() in ["imsi", "group"]:
                     print("incomplete cmd: ", "proc " + args)
                 else:
@@ -253,7 +259,7 @@ Type 'help' for more information.
             else:
                 print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
         elif len(cmd_args_list) in [3, 4]:
-            if cmd_args_list[0].lower() in ["attach", "detach", "handover"]:
+            if cmd_args_list[0].lower() in options:
                 if cmd_args_list[1].lower() in ["imsi", "group"]:
                     cmd_args_list.insert(0, "proc")
                     self.server.events_queue.put(cmd_args_list)
@@ -265,7 +271,7 @@ Type 'help' for more information.
             print("Refer to 'help proc' for detail usage")
 
     def complete_proc(self, text, line, begidx, endidx):
-        options = ["attach", "detach", "handover"]
+        options = ["attach", "detach", "handover", "idle", "mbr"]
         if not text:
             completions = options[:]
         else:
@@ -311,16 +317,16 @@ Type 'help' for more information.
 
     def do_show(self, args):
         """
-        show bearer {enb|sgw} <teid> - Show bearer information given its downlink or uplink TEID.
-        show mme [id/address]        - Show MME information given its id or address.
+        show mme [id/address]           - Show MME information given its id or address.
         show profile <prof-id> [params] - Show profile information/ parameters.
-        show session pdn <imsi> {<lbi>}
+        show session pdn <imsi> {<lbi>} - Show session pdn connections.
+        show session bearer <imsi>      - Show session bearer information.
         """
         cmd_args_list = args.split()
         if len(cmd_args_list) == 0:
             pass
         elif len(cmd_args_list) in [1, 2, 3, 4]:
-            if cmd_args_list[0].lower() in ["bearer", "mme", "profile", "session"]:
+            if cmd_args_list[0].lower() in ["mme", "profile", "session"]:
                 cmd_args_list.insert(0, "show")
                 self.server.events_queue.put(cmd_args_list)
             else:
@@ -331,7 +337,7 @@ Type 'help' for more information.
             print("Refer to 'help show' for detail usage")
 
     def complete_show(self, text, line, begidx, endidx):
-        options = ["bearer", "mme", "profile"]
+        options = ["session", "mme", "profile"]
         if not text:
             completions = options[:]
         else:

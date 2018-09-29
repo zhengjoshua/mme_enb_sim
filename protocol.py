@@ -1,8 +1,29 @@
 from gtp_v2 import *
-from collections import OrderedDict
 
 CauseNameToValue = {
     "Request Accepted": 16,
+}
+
+GTPV2MessageNameToType = {
+      "echo_request": 1,
+      "echo_response": 2,
+      "create_session_req": 32,
+      "create_session_res": 33,
+      "modify_bearer_req": 34,
+      "modify_bearer_res": 35,
+      "delete_session_req": 36,
+      "delete_session_res": 37,
+      "create_bearer_req": 95,
+      "create_bearer_res": 96,
+      "update_bearer_req": 97,
+      "update_bearer_res": 98,
+      "delete_bearer_req": 99,
+      "delete_bearer_res": 100,
+      "downlink_data_notif_failure_indic": 70,
+      "realease_bearers_req": 170,
+      "realease_bearers_res": 171,
+      "downlink_data_notif": 176,
+      "downlink_data_notif_ack": 177,
 }
 
 IETypeNameToCode = {
@@ -21,6 +42,7 @@ IETypeNameToCode = {
     "Bearer QoS": 80,
     "RAT": 82,
     "Serving Network": 83,
+    "Bearer TFT": 84,
     "ULI": 86,
     "F-TEID": 87,
     "Bearer Context": 93,
@@ -81,6 +103,7 @@ class GTPV2IE_IMSI(IE_IMSI):
             self.length = len(self.IMSI) // 2 + 1
         else:
             self.length = len(self.IMSI) // 2
+
 
 class GTPV2IE_MSISDN(IE_MSISDN):
     def __init__(self):
@@ -340,6 +363,15 @@ class GTPV2IE_ChargingCharacteristics(IE_ChargingCharacteristics):
 
     def set_field_value(self, *parameter):
         self.ChargingCharacteristric = eval(parameter[0])
+        self.length = 2
+
+
+class GTPV2IE_Cause(IE_Cause):
+    def __init__(self):
+        super(IE_Cause, self).__init__()
+
+    def set_field_value(self, *parameter):
+        self.Cause = int(parameter[0])
         self.length = 2
 
 # imsi = IE_IMSI(ietype='IMSI', length=8, IMSI=self.profile.get_parameter_value("imsi"))

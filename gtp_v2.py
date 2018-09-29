@@ -45,6 +45,10 @@ GTPmessageType = {1: "echo_request",
                      37: "delete_session_res",
                      95: "create_bearer_req",
                      96: "create_bearer_res",
+                     97: "update_bearer_req",
+                     98: "update_bearer_res",
+                     99: "delete_bearer_req",
+                     100: "delete_bearer_res",
                      70: "downlink_data_notif_failure_indic",
                      170: "realease_bearers_req",
                      171: "realease_bearers_res",
@@ -70,6 +74,7 @@ IEType = {1: "IMSI",
              84: "Bearer TFT",
              86: "ULI",
              87: "F-TEID",
+             92: "Delay Value",
              93: "Bearer Context",
              94: "Charging ID",
              95: "Charging Characteristics",
@@ -83,7 +88,27 @@ IEType = {1: "IMSI",
           }
 
 CauseValues = {
+    12: "PGW not responding",
+    13: "Network Failure",
+    14: "QoS parameter mismatch",
     16: "Request Accepted",
+    17: "Request accepted partially",
+    18: "New PDN type due to network preference",
+    19: "New PDN type due to single address bearer only",
+    64: "Context Not Found",
+    65: "Invalid Message Format",
+    67: "Invalid length",
+    68: "Service not supported",
+    69: "Mandatory IE incorrect",
+    70: "Mandatory IE missing",
+    72: "System failure",
+    73: "No resources available",
+    78: "Missing or unknown APN",
+    83: "Preferred PDN type not supported",
+    84: "All dynamic addresses are occupied",
+    100: "Remote peer not responding",
+    103: "Conditional IE missing",
+    110: "Temporarily rejected due to handover/TAU/RAU procedure in progress"
 }
 
 
@@ -412,6 +437,7 @@ PDN_TYPES = {
     1: "IPv4",
     2: "IPv6",
     3: "IPv4/IPv6",
+    4: "Non-IP"
 }
 
 TFT_OperationCode = {
@@ -807,7 +833,21 @@ class PacketFilter(gtp.IE_Base):
                    ConditionalField(
                        ByteField("component_type_idendifier2", 0), lambda pkt: pkt.length > 2),
                    ConditionalField(
-                       ByteField("id2_protocol", 0), lambda pkt: pkt.component_type_idendifier2 in (48,))
+                       ByteField("id2_protocol", 0), lambda pkt: pkt.component_type_idendifier2 == 48),
+                   ConditionalField(
+                       IPField("id2_ipv4", 0), lambda pkt: pkt.component_type_idendifier2 == 16),
+                   ConditionalField(
+                       IPField("id2_ipv4_mask", 0), lambda pkt: pkt.component_type_idendifier2 == 16),
+                   ]
+
+
+class IE_DelayValue(gtp.IE_Base):
+    name = "IE Delay Value"
+    fields_desc = [ByteEnumField("ietype", 92, IEType),
+                   ShortField("length", 0),
+                   BitField("CR_flag", 0, 4),
+                   BitField("instance", 0, 4),
+                   ByteField("delay_value", 0)
                    ]
 
 
@@ -845,6 +885,7 @@ ietypecls = {1: IE_IMSI,
              84: IE_BearerTFT,
              86: IE_ULI,
              87: IE_FTEID,
+             92: IE_DelayValue,
              93: IE_BearerContext,
              94: IE_ChargingID,
              95: IE_ChargingCharacteristics,
