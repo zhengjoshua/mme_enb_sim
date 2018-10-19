@@ -1,0 +1,1 @@
+python cmd_line.py -c mme.cfg -t mme.json

@@ -141,7 +141,6 @@ class ClientCMD(cmd.Cmd):
 Welcome to mme_enb_sim (1.0) built on Sep.2018.
 Copyright (c) Nokia-Sbell. All rights reserved.
 Report bugs or RFE to : jun.c.zheng@nokia-sbell.com.
-Template file         : {t}
 Config file           : {c}
 Default log level     : {l}
 Type 'help' for more information.
@@ -191,7 +190,7 @@ Type 'help' for more information.
                 self.server.events_queue.put(cmd_args_list)
             else:
                 print("*** Unknown syntax: ", "create " + ' '.join(cmd_args_list))
-                print("Use 'help send' for detail usage")
+                print("Use 'help create' for detail usage")
         else:
             print("*** Unknown syntax: ", "create " + ' '.join(cmd_args_list))
             print("Refer to 'help create' for detail usage")
@@ -209,7 +208,27 @@ Type 'help' for more information.
         delete profile <prof-id> - Delete specified configuration profile.
         delete session-group <grp-id> - Delete specified session group.
         """
-        pass
+        cmd_args_list = args.split()
+        if len(cmd_args_list) == 0:
+            pass
+        elif len(cmd_args_list) < 2:
+            print("incomplete cmd: ", "delete " + args)
+        elif len(cmd_args_list) in [2, 3, 4, 5]:
+            if cmd_args_list[0].lower() in ['profile', "session-group"]:
+                if cmd_args_list[0].lower() == "session-group":
+                    if len(cmd_args_list) < 2:
+                        print("incomplete cmd: ", "delete " + args)
+                        return
+                    else:
+                        pass
+                cmd_args_list.insert(0, 'delete')
+                self.server.events_queue.put(cmd_args_list)
+            else:
+                print("*** Unknown syntax: ", "delete " + ' '.join(cmd_args_list))
+                print("Use 'help delete' for detail usage")
+        else:
+            print("*** Unknown syntax: ", "delete " + ' '.join(cmd_args_list))
+            print("Refer to 'help delete' for detail usage")
 
     def complete_delete(self, text, line, begidx, endidx):
         options = ["profile", "session-group"]
@@ -236,13 +255,18 @@ Type 'help' for more information.
     def do_proc(self, args):
         """
         proc attach {imsi <imsi>|group <grp-id>} - Start E-UTRAN Attach procedure for the given UE or session group.
+        proc create-session {imsi <imsi>|group <grp-id>} - Create PDN session for the given UE or session group.
         proc detach {imsi <imsi>|group <grp-id>} - Start E-UTRAN Detach procedure for the given UE or session group.
         proc handover {imsi <imsi> | group <grp-id>} <to-enb-nb> <to-sgw-nb> [lbi <lbi> rem ebi1,...] - Make handover of UE or session group to specified ENB and SGW.
         proc idle {imsi <imsi>|group <grp-id>} [to-enb-nb] - Switch session into Idle Mode for UE or session group.
         proc mbr {imsi <imsi>|group <grp-id>} ebi [p-cscf-resto <enable|disable|indication> | with-ctrl-teid] - Send a Modify Bearer Request for imsi or session group.
+        proc send-tpdu {imsi <imsi>|group <grp-id>} <ebi> <length> <proto> <src-addr> <src-port> <dst-addr> <dst-port> <count> [<teid>] - Send uplink T-PDU(s).
+        proc send-tpdu-from-pcap-file {imsi <imsi>|group <grp-id>} <ebi> <file> <dst-addr> <dst-port> <count> [<teid>] - Send uplink T-PDU(s) from pcap file.
+        proc tpdu-reply {imsi <imsi>|group <grp-id>} <ebi> <file> [<teid>] - Replay user plane packets from pcap file.
+        proc reply {imsi <imsi>|group <grp-id>} <ebi> <file> [<teid>] - Replay control plane and user palne packets from pcap file.
         """
         cmd_args_list = args.split()
-        options = ["attach", "detach", "handover", "idle", "mbr"]
+        options = ["attach", "detach", "handover", "idle", "mbr", "create-session", "send-tpdu", "send-tpdu-from-pcap-file", "tpdu-reply", "reply"]
         if len(cmd_args_list) == 0:
             pass
         elif len(cmd_args_list) == 1:
@@ -258,7 +282,15 @@ Type 'help' for more information.
                     print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
             else:
                 print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
-        elif len(cmd_args_list) in [3, 4]:
+        elif len(cmd_args_list) in [3, 4, 5]:
+            if cmd_args_list[0].lower() in options:
+                if cmd_args_list[1].lower() in ["imsi", "group"]:
+                    cmd_args_list.insert(0, "proc")
+                    self.server.events_queue.put(cmd_args_list)
+            else:
+                print("*** Unknown syntax: ", "proc " + ' '.join(cmd_args_list))
+                print("Use 'help proc' for detail usage")
+        elif len(cmd_args_list) == 11:
             if cmd_args_list[0].lower() in options:
                 if cmd_args_list[1].lower() in ["imsi", "group"]:
                     cmd_args_list.insert(0, "proc")
@@ -271,7 +303,7 @@ Type 'help' for more information.
             print("Refer to 'help proc' for detail usage")
 
     def complete_proc(self, text, line, begidx, endidx):
-        options = ["attach", "detach", "handover", "idle", "mbr"]
+        options = ["attach", "detach", "handover", "idle", "mbr", "create-session", "send-tpdu", "send-tpdu-from-pcap-file", "tpdu-reply", "reply"]
         if not text:
             completions = options[:]
         else:
@@ -319,14 +351,15 @@ Type 'help' for more information.
         """
         show mme [id/address]           - Show MME information given its id or address.
         show profile <prof-id> [params] - Show profile information/ parameters.
-        show session pdn <imsi> {<lbi>} - Show session pdn connections.
         show session bearer <imsi>      - Show session bearer information.
+        show session-group <group-id>   - Show session-group information.
+        show session pdn <imsi> {<lbi>} - Show session pdn connections.
         """
         cmd_args_list = args.split()
         if len(cmd_args_list) == 0:
             pass
-        elif len(cmd_args_list) in [1, 2, 3, 4]:
-            if cmd_args_list[0].lower() in ["mme", "profile", "session"]:
+        elif len(cmd_args_list) in [1, 2, 3, 4, 5]:
+            if cmd_args_list[0].lower() in ["mme", "profile", "session", "session-group"]:
                 cmd_args_list.insert(0, "show")
                 self.server.events_queue.put(cmd_args_list)
             else:
@@ -337,7 +370,7 @@ Type 'help' for more information.
             print("Refer to 'help show' for detail usage")
 
     def complete_show(self, text, line, begidx, endidx):
-        options = ["session", "mme", "profile"]
+        options = ["session", "mme", "profile", "session-group"]
         if not text:
             completions = options[:]
         else:

@@ -25,8 +25,8 @@ import logging
 
 from scapy.packet import *
 from scapy.fields import *
-from scapy.layers.inet import IP, UDP
-from scapy.layers.inet6 import IP6Field
+from scapy.layers.inet import IP, UDP, TCP
+from scapy.layers.inet6 import IP6Field, IPv6
 from scapy.compat import orb
 
 import gtp as gtp
